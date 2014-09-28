@@ -1,0 +1,44 @@
+<Configuration Product="ProPlusr">
+
+	<Display Level="basic" CompletionNotice="yes" SuppressModal="no" AcceptEula="yes" /> 
+	
+	<!-- <Logging Type="standard" Path="%temp%" Template="Microsoft Office Professional Plus Setup(*).txt" /> -->
+		
+	
+	
+	
+	
+	<USERNAME Value="Client" />	
+	<COMPANYNAME Value="Matrix" /> 
+	
+	<INSTALLLOCATION Value="%programfiles%\Microsoft Office" />
+		
+	<OptionState Id="ACCESSFiles" State="Absent" Children="force" />	<!-- Do Not Install Access -->
+	<OptionState Id="GrooveFiles" State="Absent" Children="force" />	<!-- Do Not Install Groove -->
+	<OptionState Id="OUTLOOKFiles" State="Absent" Children="force" />	<!-- Do Not Install Outlook -->
+	<OptionState Id="PROJECTFiles" State="Absent" Children="force" />	<!-- Do Not Install Project -->
+	<OptionState Id="PubPrimary" State="Absent" Children="force" />	<!-- Do Not Install Publisher -->	
+	<OptionState Id="OneNoteToAddIns" State="Absent" Children="force" />	<!-- Do Not Install OneNote AddIns-->
+	<OptionState Id="SHAREDFiles" State="Absent" Children="force" />	<!-- Do Not Install SHAREDFiles-->
+	<OptionState Id="TOOLSFiles" State="Absent" Children="force" />	<!-- Do Not Install TOOLSFiles-->
+	<OptionState Id="VBAFiles" State="Local" Children="force" />	<!-- Do Not Install VBAFiles-->	
+	<OptionState Id="VisioPreviewerFiles" State="Absent" Children="force" />	<!-- Do Not Install VisioPreviewerFiles-->
+	<OptionState Id="QueryFiles" State="Absent" Children="force" />	<!-- Do Not Install **-->
+	<OptionState Id="VISIOFiles" State="Absent" Children="force" />	<!-- Do Not Install Visio -->	
+	<OptionState Id="XDOCSFiles" State="Absent" Children="force" />	<!-- Do Not Install InfoPath -->
+	
+	<!-- <LIS CACHEACTION="CacheOnly" /> -->
+	
+	<!-- <LIS SOURCELIST="\\server1\share\Office;\\server2\share\Office" /> -->
+	
+	<!-- <DistributionPoint Location="\\server\share\Office" /> -->
+	
+	<!-- <OptionState Id="OptionID" State="absent" Children="force"  /> -->
+	
+	<!-- <Setting Id="SETUP_REBOOT" Value="IfNeeded" /> -->
+	
+	<!-- <Command Path="%windir%\system32\msiexec.exe" Args="/i \\server\share\my.msi" QuietArg="/q" ChainPosition="after" Execute="install" /> -->
+	
+	<PIDKEY Value="GCXQJKFYBGXR77FXF3K8WT7QW" />
+
+</Configuration>
