@@ -1,11 +1,3 @@
-//     
-// a simple echo server using epoll in linux    
-//     
-// 2009-11-05    
-// 2013-03-22:修改了几个问题，1是/n格式问题，2是去掉了原代码不小心加上的ET模式;  
-// 本来只是简单的示意程序，决定还是加上 recv/send时的buffer偏移  
-// by sparkling    
-// 
 
 #include <sys/socket.h>  
 #include <sys/epoll.h>  
@@ -24,10 +16,10 @@ using namespace std;
 
 struct myevent_s  
 {  
-    int fd;  
-    void (*call_back)(int fd, int events, void *arg);  
+    int fd;      
     int events;  
     void *arg;  
+	void (*call_back)(int fd, int events, void *arg);  
     int status; // 1: in epoll wait list, 0 not in  
     char buff[128]; // recv data buffer  
     int len, s_offset;  
@@ -37,14 +29,14 @@ struct myevent_s
 // set event  
 void EventSet(myevent_s *ev, int fd, void (*call_back)(int, int, void*), void *arg)  
 {  
-    ev->fd = fd;  
-    ev->call_back = call_back;  
+    ev->fd = fd;      
     ev->events = 0;  
     ev->arg = arg;  
+	ev->call_back = call_back;  
     ev->status = 0;
-    bzero(ev->buff, sizeof(ev->buff));
-    ev->s_offset = 0;  
-    ev->len = 0;
+    bzero(ev->buff, sizeof(ev->buff)); 
+	ev->len = 0; 
+    ev->s_offset = 0;     
     ev->last_active = time(NULL);  
 }  
 
@@ -202,17 +194,35 @@ void InitListenSocket(int epollFd, short port)
     listen(listenFd, 5);  
 }  
 
+int CreateAndBind(short port)
+{
+	int epollFd = epoll_create(MAX_EVENTS);  
+    if(epollFd <= 0)
+	{
+		printf("create epoll failed.%d\n", epollFd);  
+		return epollFd;
+	}
+    // create & bind listen socket, and add to epoll, set non-blocking  
+    InitListenSocket(epollFd, port);  
+}
+
+
+
 int main(int argc, char **argv)  
 {  
+	printf("argc=%d\n",argc);
+	for(int i=0;i<argc;++i)
+	{
+		printf("argv[%d]=%s\n",i,argv[i]);
+	}
+	
     unsigned short port = 12345; // default port  
     if(argc == 2){  
         port = atoi(argv[1]);  
     }  
     // create epoll  
-    g_epollFd = epoll_create(MAX_EVENTS);  
-    if(g_epollFd <= 0) printf("create epoll failed.%d\n", g_epollFd);  
-    // create & bind listen socket, and add to epoll, set non-blocking  
-    InitListenSocket(g_epollFd, port);  
+    g_epollFd = CreateAndBind(port);  
+    
     // event loop  
     struct epoll_event events[MAX_EVENTS];  
     printf("server running:port[%d]\n", port);  
