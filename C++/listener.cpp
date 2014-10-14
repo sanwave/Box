@@ -1,8 +1,5 @@
 
 #include <iostream>
-
-
-
 #include <sys/socket.h>  
 #include <sys/epoll.h>  
 #include <netinet/in.h>  
@@ -97,8 +94,7 @@ public:
 		int listenFd = socket(AF_INET, SOCK_STREAM, 0);  
 		if(listenFd==-1)
 		{
-			printf("create socket error: %s(errno: %d)\n",strerror(errno),errno);
-			m_EpollFd = -1;
+			printf("create socket error: %s(errno: %d)\n",strerror(errno),errno);			
 		}
 #ifdef DEBUG
 		else
@@ -116,21 +112,19 @@ public:
 		if(bind(listenFd, (const sockaddr*)&servAddr, sizeof(servAddr))==-1)
 		{
 			printf("bind socket error: %s(errno: %d)\n",strerror(errno),errno);
-			m_EpollFd = -1;
 		}
 		
 		if(listen(listenFd, -1)==-1)
 		{
 			printf("listen socket error: %s(errno: %d)\n",strerror(errno),errno);
-			m_EpollFd = -1;
 		}
 		
-		return m_EpollFd;
+		return listenFd;
 	}
 	
-	int SetNonBlock(int sFd)
+	int SetNonBlock(int nFd)
 	{
-		if( fcntl(sFd, F_SETFL, O_NONBLOCK) )
+		if( fcntl(nFd, F_SETFL, O_NONBLOCK) )
 		{
 			perror ("fcntl");
 			return -1;
@@ -159,16 +153,16 @@ public:
 	
 	int InitEpoll(int nFd)
 	{
-		int epollFd = epoll_create(MAX_EVENTS);  
-		if(epollFd <= 0)
+		m_EpollFd = epoll_create(MAX_EVENTS);  
+		if(m_EpollFd <= 0)
 		{
-			printf("create epoll failed.%d\n", epollFd);  
-			return epollFd;
+			printf("create epoll failed.%d\n", m_EpollFd);
 		}		
 		m_Events[MAX_EVENTS].Set( nFd, this->AcceptConn, this);  
 		// add listen socket  
-		m_Events[MAX_EVENTS].Add(epollFd, EPOLLIN);  
-		// bind & listen  
+		m_Events[MAX_EVENTS].Add(m_EpollFd, EPOLLIN);  
+		// bind & listen
+		return m_EpollFd;
 	}
 	
 	// accept new connections from clients  
@@ -287,11 +281,14 @@ int main(int argc, char **argv)
         port = atoi(argv[1]);  
     }
 	
-	Listener listener=Listener();	
+	Listener listener=Listener();
 	
     // create and bind socket 
-    listener.CreateAndBind(port);  
+    int listenFd = listener.CreateAndBind(port);
     
+	listener.SetNonBlock(listenFd);
+	listener.InitEpoll(listenFd);
+	
     // event loop  
     struct epoll_event events[MAX_EVENTS];  
     printf("server running:port[%d]\n", port);  
