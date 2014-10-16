@@ -272,16 +272,9 @@ public:
 };
 
 int main(int argc, char **argv)  
-{
-
-	/*printf("argc=%d\n",argc);
-	for(int i=0;i<argc;++i)
-	{
-		printf("argv[%d]=%s\n",i,argv[i]);
-	}*/
-	
+{	
     unsigned short port = 12345; // default port  
-    if(argc == 2){  
+    if(argc == 2){
         port = atoi(argv[1]);  
     }
 	
@@ -294,7 +287,7 @@ int main(int argc, char **argv)
 	listener.InitEpoll(sFd);
 	
     // event loop  
-    struct epoll_event events[MAX_EVENTS];  
+    struct epoll_event epollEvents[MAX_EVENTS];  
     printf("INFO::Server is running on port %d\n", port);  
     int checkPos = 0;  
     while(true)
@@ -321,7 +314,7 @@ int main(int argc, char **argv)
             }  
         }  
         // wait for events to happen  
-        int fds = epoll_wait(listener.m_EpollFd, events, MAX_EVENTS, 1000);  
+        int fds = epoll_wait(listener.m_EpollFd, epollEvents, MAX_EVENTS, 1000);  
         if(fds < 0)
 		{  
             printf("ERROR::epoll_wait error, exit\n");  
@@ -329,14 +322,14 @@ int main(int argc, char **argv)
         }  
         for(int i = 0; i < fds; i++)
 		{  
-            ListenerEvent *ev = (ListenerEvent*)events[i].data.ptr;  
-            if((events[i].events&EPOLLIN)&&(ev->m_Events&EPOLLIN)) // read event  
+            ListenerEvent *ev = (ListenerEvent *)epollEvents[i].data.ptr;  
+            if((epollEvents[i].events&EPOLLIN) && (ev->m_Events&EPOLLIN)) // read event  
             {  
-                ev->CallBack(ev->m_Fd, events[i].events, ev->m_Arg, &listener);  
+                ev->CallBack(ev->m_Fd, epollEvents[i].events, ev->m_Arg, &listener);  
             }  
-            if((events[i].events&EPOLLOUT)&&(ev->m_Events&EPOLLOUT)) // write event  
+            if((epollEvents[i].events&EPOLLOUT) && (ev->m_Events&EPOLLOUT)) // write event  
             {  
-                ev->CallBack(ev->m_Fd, events[i].events, ev->m_Arg, &listener);  
+                ev->CallBack(ev->m_Fd, epollEvents[i].events, ev->m_Arg, &listener);  
             }  
         }  
     }  
