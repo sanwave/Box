@@ -14,29 +14,28 @@
 using namespace std;
 
 #define MAX_EVENTS 500
-#define DEBUG
 
-class ListenerEvent
+class BuffEvent
 {
 public:	
 	int m_Fd;
 	int m_Events;
 	void *m_Arg;
-	void *m_ListenerPtr;
-	void (*m_CallBack)(int m_Fd, int m_Events, void *m_Arg, void *m_ListenerPtr);
+	void *m_EpollServerPtr;
+	void (*CallBack)(int m_Fd, int m_Events, void *m_Arg, void *m_EpollServerPtr);
 	
 	int m_Status; // 1: in epoll wait list, 0 not in  
 	char m_Buff[128]; // recv data buffer  
 	int m_Len, m_Offset;  
 	long m_LastActive; // last active time 
 	
-	void Set(int sFd, void (*callBack)(int, int, void*, void*), void *pListener)
+	void Set(int sFd, void (*callBack)(int, int, void*, void*), void *pEpollServer)
 	{
 		m_Fd = sFd;      
 		m_Events = 0;  
 		m_Arg = this;
-		m_ListenerPtr=pListener;
-		m_CallBack = callBack;  
+		m_EpollServerPtr = pEpollServer;
+		CallBack = callBack;  
 		m_Status = 0;
 		bzero(m_Buff, sizeof(m_Buff)); 
 		m_Len = 0; 
@@ -76,17 +75,15 @@ public:
 	}	  
 };
 
-class Listener
+class CEpollServer
 {
 public:
-	int m_EpollFd;
-	//static Listener *m_ThisPtr;//=NULL;
-	ListenerEvent m_Events[MAX_EVENTS+1]; // m_Events[MAX_EVENTS] is used by listen fd  
-		
-	~Listener()
+	int m_EpollFd;	
+	BuffEvent m_Events[MAX_EVENTS+1]; // m_Events[MAX_EVENTS] is used by listen fd  
+
+	~CEpollServer()
 	{
 		close(m_EpollFd);
-		//m_ThisPtr = NULL;
 	}
 	
 	// create & bind listen socket, and add to epoll, set non-blocking 
@@ -97,13 +94,11 @@ public:
 		{
 			printf("ERROR::Create socket error: %s(errno: %d)\n",strerror(errno),errno);			
 		}
-#ifdef DEBUG
 		else
 		{
 			printf("INFO::Server listen fd is %d\n", sFd);  
 		}
-#endif
-				
+
 		sockaddr_in servAddr;  
 		bzero(&servAddr, sizeof(servAddr));  //memset, fill with 0
 		servAddr.sin_family = AF_INET;  
@@ -129,8 +124,7 @@ public:
 		{
 			perror ("fcntl");
 			return -1;
-		}// set non-blocking  		
-		
+		}// set non-blocking		
 		return 0;		
 	}
 	
@@ -140,7 +134,7 @@ public:
 		if(m_EpollFd <= 0)
 		{
 			printf("ERROR::Create epoll failed, return %d \n", m_EpollFd);
-		}		
+		}
 		m_Events[MAX_EVENTS].Set(sFd, this->AcceptConn, this);  
 		// add listen socket  
 		m_Events[MAX_EVENTS].Add(m_EpollFd, EPOLLIN);
@@ -149,9 +143,9 @@ public:
 	}
 	
 	// accept new connections from clients  
-	static void AcceptConn(int sFd, int events, void *arg, void *pThis)  
+	static void AcceptConn(int sFd, int events, void *arg, void *pEpollServer)  
 	{
-		Listener *m_ThisPtr = (Listener *)pThis;
+		CEpollServer *pThis = (CEpollServer *)pEpollServer;
 		struct sockaddr_in sin;  
 		socklen_t len = sizeof(struct sockaddr_in);  
 		int connFd, i;  
@@ -159,7 +153,7 @@ public:
 		if((connFd = accept(sFd, (struct sockaddr*)&sin, &len)) == -1)  
 		{
 			if(errno != EAGAIN && errno != EINTR)  
-			{  
+			{
 			}
 			printf("ERROR::%s: accept, %d", __func__, errno);  
 			return;
@@ -168,7 +162,7 @@ public:
 		{
 			for(i = 0; i < MAX_EVENTS; i++)
 			{
-				if(m_ThisPtr->m_Events[i].m_Status == 0)
+				if(pThis->m_Events[i].m_Status == 0)
 				{
 					break;
 				}
@@ -179,72 +173,123 @@ public:
 				break;  
 			}
 			
-			if(m_ThisPtr->SetNonBlock(connFd) < 0)
+			if(pThis->SetNonBlock(connFd) < 0)
 			{
 				//printf("%s: fcntl nonblocking failed:%d", __func__, iret);
 				break;
 			}
 			// add a read event for receive data  
-			m_ThisPtr->m_Events[i].Set(connFd, RecvData, pThis);  
-			m_ThisPtr->m_Events[i].Add(m_ThisPtr->m_EpollFd, EPOLLIN);
+			pThis->m_Events[i].Set(connFd, RecvData, pThis);  
+			pThis->m_Events[i].Add(pThis->m_EpollFd, EPOLLIN);
 		}while(0);  
 		printf("INFO::New connecion from %s:%d,\tTime:%ld,\tIndex:%d\n", inet_ntoa(sin.sin_addr), 
-				ntohs(sin.sin_port), m_ThisPtr->m_Events[i].m_LastActive, i);  
+				ntohs(sin.sin_port), pThis->m_Events[i].m_LastActive, i);  
 	}
 
 	// receive data  
-	static void RecvData(int sFd, int events, void *arg, void *pThis)  
+	static void RecvData(int sFd, int events, void *arg, void *pEpollServer)  
 	{
-		Listener *m_ThisPtr=(Listener *)pThis;
-		ListenerEvent *ev = (ListenerEvent*)arg; 
+		CEpollServer *pThis=(CEpollServer *)pEpollServer;
+		BuffEvent *pEvent = (BuffEvent*)arg; 
 		// receive data
-		int len = recv(sFd, ev->m_Buff+ev->m_Len, sizeof(ev->m_Buff)-1-ev->m_Len, 0);
-		ev->Del(m_ThisPtr->m_EpollFd);
+		int len = recv(sFd, pEvent->m_Buff+pEvent->m_Len, sizeof(pEvent->m_Buff)-1-pEvent->m_Len, 0);
+		pEvent->Del(pThis->m_EpollFd);
 		if(len > 0)
 		{
-			ev->m_Len += len;
-			ev->m_Buff[len] = '\0';
-			printf("INFO::C[%d]:%s\n", sFd, ev->m_Buff);  
+			pEvent->m_Len += len;
+			pEvent->m_Buff[len] = '\0';
+			printf("INFO::C[%d]:%s\n", sFd, pEvent->m_Buff);  
 			// change to send event  
-			ev->Set( sFd, SendData, pThis);
-			ev->Add(m_ThisPtr->m_EpollFd, EPOLLOUT);  
+			pEvent->Set( sFd, SendData, pThis);
+			pEvent->Add(pThis->m_EpollFd, EPOLLOUT);  
 		}  
 		else if(len == 0)  
 		{  
-			close(ev->m_Fd);  
-			printf("INFO::[fd=%d] pos[%d], closed gracefully.\n", sFd, ev-m_ThisPtr->m_Events);  
+			close(pEvent->m_Fd);  
+			printf("INFO::[fd=%d] pos[%d], closed gracefully.\n", sFd, pEvent-pThis->m_Events);  
 		}  
 		else  
 		{  
-			close(ev->m_Fd);  
+			close(pEvent->m_Fd);  
 			printf("INFO::ecv[fd=%d] error[%d]:%s\n", sFd, errno, strerror(errno));  
 		}  
 	}  
 
 	// send data  
-	static void SendData(int sFd, int events, void *arg, void *pThis)  
+	static void SendData(int sFd, int events, void *arg, void *pEpollServer)  
 	{
-		Listener *m_ThisPtr=(Listener *)pThis;
-		ListenerEvent *ev = (ListenerEvent*)arg; 
+		CEpollServer *pThis=(CEpollServer *)pEpollServer;
+		BuffEvent *pEvent = (BuffEvent*)arg; 
 		// send data  
-		int len = send(sFd, ev->m_Buff + ev->m_Offset, ev->m_Len - ev->m_Offset, 0);
+		int len = send(sFd, pEvent->m_Buff + pEvent->m_Offset, pEvent->m_Len - pEvent->m_Offset, 0);
 		if(len > 0)  
 		{
-			printf("INFO::Send data, fd is %d, [%d<->%d]%s\n", sFd, len, ev->m_Len, ev->m_Buff);
-			ev->m_Offset += len;
-			if(ev->m_Offset == ev->m_Len)
+			printf("INFO::Send data, fd is %d, [%d<->%d]%s\n", sFd, len, pEvent->m_Len, pEvent->m_Buff);
+			pEvent->m_Offset += len;
+			if(pEvent->m_Offset == pEvent->m_Len)
 			{
 				// change to receive event
-				ev->Del(m_ThisPtr->m_EpollFd);
-				ev->Set(sFd, RecvData, pThis);  
-				ev->Add(m_ThisPtr->m_EpollFd, EPOLLIN);  
+				pEvent->Del(pThis->m_EpollFd);
+				pEvent->Set(sFd, RecvData, pThis);  
+				pEvent->Add(pThis->m_EpollFd, EPOLLIN);  
 			}
 		}  
 		else
 		{
-			close(ev->m_Fd);
-			ev->Del(m_ThisPtr->m_EpollFd);
+			close(pEvent->m_Fd);
+			pEvent->Del(pThis->m_EpollFd);
 			printf("INFO::Send fd is %d, error[%d]\n", sFd, errno);
+		}
+	}
+	
+	void Run()
+	{
+		// event loop  
+		struct epoll_event epollEvents[MAX_EVENTS];	 
+		int checkPos = 0;  
+		
+		while(true)
+		{
+			// a simple timeout check here, every time 100, better to use a mini-heap, and add timer event  
+			long now = time(NULL);  
+			for(int i = 0; i < 100; i++, checkPos++) // doesn't check listen fd  
+			{  
+				if(checkPos == MAX_EVENTS)
+				{
+					checkPos = 0; // recycle
+				}
+				
+				if(m_Events[checkPos].m_Status != 1)
+				{
+					continue;
+				}
+				long duration = now - m_Events[checkPos].m_LastActive;  
+				if(duration >= 60) // 60s timeout  
+				{
+					close(m_Events[checkPos].m_Fd);  
+					printf("INFO::[fd=%d] timeout[%ld--%ld].\n", m_Events[checkPos].m_Fd, m_Events[checkPos].m_LastActive, now);
+					m_Events[checkPos].Del(m_EpollFd);
+				}  
+			}  
+			// wait for events to happen  
+			int fds = epoll_wait(m_EpollFd, epollEvents, MAX_EVENTS, 1000);  
+			if(fds < 0)
+			{  
+				printf("ERROR::epoll_wait error, exit\n");  
+				break;  
+			}  
+			for(int i = 0; i < fds; i++)
+			{  
+				BuffEvent *pEvent = (BuffEvent *)epollEvents[i].data.ptr;  
+				if((epollEvents[i].events & EPOLLIN))// && (pEvent->m_Events&EPOLLIN)) // read event  
+				{  
+					pEvent->CallBack(pEvent->m_Fd, epollEvents[i].events, pEvent->m_Arg, this);  
+				}
+				if((epollEvents[i].events & EPOLLOUT))// && (pEvent->m_Events&EPOLLOUT)) // write event  
+				{  
+					pEvent->CallBack(pEvent->m_Fd, epollEvents[i].events, pEvent->m_Arg, this);  
+				}
+			}
 		}
 	}
 };
@@ -259,60 +304,15 @@ int main(int argc, char **argv)
 	printf("\n==============       Epoll Server Demo       ==============\n", port);  
     printf("INFO::Server is running on port %d\n", port); 
 	
-	Listener listener=Listener();	
+	CEpollServer server=CEpollServer();	
     // create and bind socket 
-    int sFd = listener.CreateAndBind(port);
+    int sFd = server.CreateAndBind(port);
     
-	listener.SetNonBlock(sFd);
-	listener.InitEpoll(sFd);
+	server.SetNonBlock(sFd);
+	server.InitEpoll(sFd);    
+    
+	server.Run();
 	
-    // event loop  
-    struct epoll_event epollEvents[MAX_EVENTS];
- 
-    int checkPos = 0;  
-    while(true)
-	{  
-        // a simple timeout check here, every time 100, better to use a mini-heap, and add timer event  
-        long now = time(NULL);  
-        for(int i = 0; i < 100; i++, checkPos++) // doesn't check listen fd  
-        {  
-            if(checkPos == MAX_EVENTS)
-			{
-				checkPos = 0; // recycle
-			}
-			
-            if(listener.m_Events[checkPos].m_Status != 1)
-			{
-				continue;
-			}
-            long duration = now - listener.m_Events[checkPos].m_LastActive;  
-            if(duration >= 60) // 60s timeout  
-            {
-                close(listener.m_Events[checkPos].m_Fd);  
-                printf("INFO::[fd=%d] timeout[%ld--%ld].\n", listener.m_Events[checkPos].m_Fd, listener.m_Events[checkPos].m_LastActive, now);
-                listener.m_Events[checkPos].Del(listener.m_EpollFd);
-            }  
-        }  
-        // wait for events to happen  
-        int fds = epoll_wait(listener.m_EpollFd, epollEvents, MAX_EVENTS, 1000);  
-        if(fds < 0)
-		{  
-            printf("ERROR::epoll_wait error, exit\n");  
-            break;  
-        }  
-        for(int i = 0; i < fds; i++)
-		{  
-            ListenerEvent *ev = (ListenerEvent *)epollEvents[i].data.ptr;  
-            if((epollEvents[i].events & EPOLLIN))// && (ev->m_Events&EPOLLIN)) // read event  
-            {  
-                ev->m_CallBack(ev->m_Fd, epollEvents[i].events, ev->m_Arg, &listener);  
-            }  
-            if((epollEvents[i].events & EPOLLOUT))// && (ev->m_Events&EPOLLOUT)) // write event  
-            {  
-                ev->m_CallBack(ev->m_Fd, epollEvents[i].events, ev->m_Arg, &listener);  
-            }  
-        }  
-    }  
-    // free resource  
+	// free resource
     return 0;  
-}   
+}
