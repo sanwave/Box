@@ -57,9 +57,9 @@ public:
 			m_Status = 1;
 		}  
 		if(epoll_ctl(epollFd, op, m_Fd, &epv) < 0)  
-			printf("ERROR::Event Add failed, socket fd is %d, evnets is %d\n", m_Fd, events);  
+			printf("ERROR::Add event failed, socket fd is %d, evnets is %d\n", m_Fd, events);  
 		else  
-			printf("INFO::Event Add OK, soket fd is %d, op is %d, evnets is %0X\n", m_Fd, op, events);  
+			printf("INFO::Add event successfully, soket fd is %d, op is %d, evnets is %0X\n", m_Fd, op, events);  
 	}
 	
 	void Del(int epollFd)
@@ -78,12 +78,52 @@ public:
 class CEpollServer
 {
 public:
-	int m_EpollFd;	
+	int m_EpollFd;
+	in_addr_t m_LocalAddr;
+	in_addr_t m_RemoteAddr;
+	short m_LocalPort;
+	short m_RemotePort;
 	BuffEvent m_Events[MAX_EVENTS+1]; // m_Events[MAX_EVENTS] is used by listen fd  
 
 	~CEpollServer()
 	{
 		close(m_EpollFd);
+	}
+	
+	void GetLocalAddr(int sFd)
+	{
+		struct sockaddr addr;
+		struct sockaddr_in* addr_v4;
+		socklen_t addr_len = sizeof(addr);
+		
+		bzero(&addr, sizeof(addr));  //memset, fill with 0
+		if (0 == getsockname(sFd, &addr, &addr_len))
+		{
+			if (addr.sa_family == AF_INET)
+			{
+				addr_v4 = (sockaddr_in*)&addr;
+				m_LocalAddr = addr_v4->sin_addr.s_addr;
+				m_LocalPort = ntohs(addr_v4->sin_port);
+			}
+		}
+	}
+	
+	void GetRemoteAddr(int sFd)
+	{
+		struct sockaddr addr;
+		struct sockaddr_in* addr_v4;
+		socklen_t addr_len = sizeof(addr);
+		
+		bzero(&addr, sizeof(addr));  //memset, fill with 0
+		if (0 == getpeername(sFd, &addr, &addr_len))
+		{
+			if (addr.sa_family == AF_INET)
+			{
+				addr_v4 = (sockaddr_in*)&addr;
+				m_RemoteAddr = addr_v4->sin_addr.s_addr;
+				m_RemotePort = ntohs(addr_v4->sin_port);
+			}
+		}
 	}
 	
 	// create & bind listen socket, and add to epoll, set non-blocking 
@@ -109,6 +149,8 @@ public:
 		{
 			printf("ERROR::Bind socket error: %s(errno: %d)\n",strerror(errno),errno);
 		}
+		
+		m_LocalPort = servAddr.sin_port;
 		
 		if(listen(sFd, -1)==-1)
 		{
@@ -181,7 +223,8 @@ public:
 			// add a read event for receive data  
 			pThis->m_Events[i].Set(connFd, RecvData, pThis);  
 			pThis->m_Events[i].Add(pThis->m_EpollFd, EPOLLIN);
-		}while(0);  
+				
+		}while(0);			
 		printf("INFO::New connecion from %s:%d,\tTime:%ld,\tIndex:%d\n", inet_ntoa(sin.sin_addr), 
 				ntohs(sin.sin_port), pThis->m_Events[i].m_LastActive, i);  
 	}
@@ -198,20 +241,27 @@ public:
 		{
 			pEvent->m_Len += len;
 			pEvent->m_Buff[len] = '\0';
-			printf("INFO::C[%d]:%s\n", sFd, pEvent->m_Buff);  
+			printf("INFO::Receive a msg:%s, from connection fd = %d\n", pEvent->m_Buff, sFd);
+			
+			char ans[150];
+			sprintf(ans, "You said %s. This is from CEpollServer.\n", 
+				pEvent->m_Buff/*, inet_ntoa(pThis->m_LocalAddr), pThis->m_LocalPort*/);
+			
 			// change to send event  
-			pEvent->Set( sFd, SendData, pThis);
-			pEvent->Add(pThis->m_EpollFd, EPOLLOUT);  
+			pEvent->Set(sFd, SendData, pThis);
+			pEvent->Add(pThis->m_EpollFd, EPOLLOUT);
+						
+			send(sFd, ans, strlen(ans), 0);
 		}  
 		else if(len == 0)  
-		{  
+		{
 			close(pEvent->m_Fd);  
 			printf("INFO::[fd=%d] pos[%d], closed gracefully.\n", sFd, pEvent-pThis->m_Events);  
 		}  
 		else  
 		{  
 			close(pEvent->m_Fd);  
-			printf("INFO::ecv[fd=%d] error[%d]:%s\n", sFd, errno, strerror(errno));  
+			printf("ERROR::ecv[fd=%d] error[%d]:%s\n", sFd, errno, strerror(errno));  
 		}  
 	}  
 
@@ -222,7 +272,7 @@ public:
 		BuffEvent *pEvent = (BuffEvent*)arg; 
 		// send data  
 		int len = send(sFd, pEvent->m_Buff + pEvent->m_Offset, pEvent->m_Len - pEvent->m_Offset, 0);
-		if(len > 0)  
+		if(len > 0)
 		{
 			printf("INFO::Send data, fd is %d, [%d<->%d]%s\n", sFd, len, pEvent->m_Len, pEvent->m_Buff);
 			pEvent->m_Offset += len;
@@ -238,7 +288,7 @@ public:
 		{
 			close(pEvent->m_Fd);
 			pEvent->Del(pThis->m_EpollFd);
-			printf("INFO::Send fd is %d, error[%d]\n", sFd, errno);
+			printf("ERROR::Send fd is %d, error[%d]\n", sFd, errno);
 		}
 	}
 	
@@ -301,10 +351,10 @@ int main(int argc, char **argv)
 	{
         port = atoi(argv[1]);  
     }
-	printf("\n==============       Epoll Server Demo       ==============\n", port);  
+	printf("\n\n==============       Epoll Server Demo       ==============\n\n", port);  
     printf("INFO::Server is running on port %d\n", port); 
 	
-	CEpollServer server=CEpollServer();	
+	CEpollServer server = CEpollServer();	
     // create and bind socket 
     int sFd = server.CreateAndBind(port);
     
