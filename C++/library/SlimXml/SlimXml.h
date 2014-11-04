@@ -4,17 +4,12 @@
 #include <string>
 #include <list>
 #include <istream>
+#include <algorithm>
 
-//disable this to make parsing a little bit faster
-//#define SLIM_TRANSFER_CHARACTER
+#include "file.h"
 
 namespace slim
 {
-
-#undef SLIM_USE_WCHAR
-#if defined (_MSC_VER) && defined (UNICODE)
-	#define SLIM_USE_WCHAR
-#endif
 
 enum Encode
 {
@@ -23,43 +18,22 @@ enum Encode
 	UTF_8_NO_MARK,
 	UTF_16,
 	UTF_16_BIG_ENDIAN,
-
-#if defined (SLIM_USE_WCHAR) || defined (__GNUC__)
 	DefaultEncode = UTF_8
-#else
-	DefaultEncode = ANSI
-#endif
 };
 
-#ifdef SLIM_USE_WCHAR
-	typedef wchar_t Char;
-	#define T(str) L##str
-	#define StrToI _wtoi
-	#define StrToF _wtof
-	#define Sprintf swprintf
-	#define Sscanf swscanf
-	#define Strlen wcslen
-	#define Strcmp wcscmp
-	#define Strncmp wcsncmp
-	#define Memchr wmemchr
-	#define Strcpy wcscpy
-#else
-	typedef char Char;
-	#define T(str) str
-	#define StrToI atoi
-	#define StrToF atof
-#if defined (__GNUC__)
-	#define Sprintf snprintf
-#elif defined (_MSC_VER)
-	#define Sprintf sprintf_s
-#endif
-	#define Sscanf sscanf
-	#define Strlen strlen
-	#define Strcmp strcmp
-	#define Strncmp strncmp
-	#define Memchr memchr
-	#define Strcpy strcpy
-#endif
+
+typedef wchar_t Char;
+#define T(str) L##str
+#define StrToI _wtoi
+#define StrToF _wtof
+#define Sprintf swprintf
+#define Sscanf swscanf
+#define Strlen wcslen
+#define Strcmp wcscmp
+#define Strncmp wcsncmp
+#define Memchr wmemchr
+#define Strcpy wcscpy
+
 
 class XmlAttribute;
 class XmlNode;
@@ -178,13 +152,6 @@ public:
 	XmlAttribute* addAttribute(const Char* name, float value);
 	XmlAttribute* addAttribute(const Char* name, double value);
 
-protected:
-	void writeNode(String& output, int depth) const;
-
-	void writeChildNodes(String& output, int depth) const;
-
-	void writeTransferredString(String& output, const Char* input) const;
-
 private:
 	NodeType		m_type;
 	AttributeList	m_attributes;
@@ -200,13 +167,9 @@ public:
 	~XmlDocument();
 
 	bool loadFromFile(const Char* filename);
-	bool loadFromStream(std::istream& input);
-	bool loadFromMemory(const char* buffer, size_t size);
-
-	bool save(const Char* filename, Encode encode = DefaultEncode) const;
 
 private:
-	bool reallyLoadFromMemory(char* buffer, size_t size, bool copiedMemory);
+
 
 	bool parse(Char* input, size_t size);
 
@@ -452,10 +415,6 @@ inline XmlAttribute* XmlNode::getNextAttribute(AttributeIterator& iter) const
 	}
 	return NULL;
 }
-
-size_t utf8toutf16(const char* u8, size_t size, wchar_t* u16, size_t outBufferSize);
-size_t utf16toutf8(const wchar_t* u16, size_t size, char* u8, size_t outBufferSize);
-Encode detectEncode(const char* str, size_t size, bool& multiBytes);
 
 }
 
