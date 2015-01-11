@@ -15,7 +15,7 @@ int main()
 	cout << "root node count:" << xml.getChildCount() << endl;
 
 	NodeIterator it1;
-
+	
 	XmlNode *node1 = xml.getFirstChild(it1);
 
 	wcout << L"1st layer node name:" << node1->getName() << endl;

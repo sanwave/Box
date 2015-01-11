@@ -126,7 +126,6 @@ public:
 		}
 	}
 	
-	// create & bind listen socket, and add to epoll, set non-blocking 
 	int CreateAndBind(short port)
 	{		
 		int sFd = socket(AF_INET, SOCK_STREAM, 0);  
@@ -184,7 +183,6 @@ public:
 		return m_EpollFd;
 	}
 	
-	// accept new connections from clients  
 	static void AcceptConn(int sFd, int events, void *arg, void *pEpollServer)  
 	{
 		CEpollServer *pThis = (CEpollServer *)pEpollServer;
@@ -229,7 +227,6 @@ public:
 				ntohs(sin.sin_port), pThis->m_Events[i].m_LastActive, i);  
 	}
 
-	// receive data  
 	static void RecvData(int sFd, int events, void *arg, void *pEpollServer)  
 	{
 		CEpollServer *pThis=(CEpollServer *)pEpollServer;
@@ -265,7 +262,6 @@ public:
 		}  
 	}  
 
-	// send data  
 	static void SendData(int sFd, int events, void *arg, void *pEpollServer)  
 	{
 		CEpollServer *pThis=(CEpollServer *)pEpollServer;
@@ -294,21 +290,18 @@ public:
 	
 	void Run()
 	{
-		// event loop  
 		struct epoll_event epollEvents[MAX_EVENTS];	 
 		int checkPos = 0;  
 		
 		while(true)
 		{
-			// a simple timeout check here, every time 100, better to use a mini-heap, and add timer event  
 			long now = time(NULL);  
 			for(int i = 0; i < 100; i++, checkPos++) // doesn't check listen fd  
 			{  
 				if(checkPos == MAX_EVENTS)
 				{
 					checkPos = 0; // recycle
-				}
-				
+				}				
 				if(m_Events[checkPos].m_Status != 1)
 				{
 					continue;
@@ -320,8 +313,7 @@ public:
 					printf("INFO::[fd=%d] timeout[%ld--%ld].\n", m_Events[checkPos].m_Fd, m_Events[checkPos].m_LastActive, now);
 					m_Events[checkPos].Del(m_EpollFd);
 				}  
-			}  
-			// wait for events to happen  
+			}
 			int fds = epoll_wait(m_EpollFd, epollEvents, MAX_EVENTS, 1000);  
 			if(fds < 0)
 			{  
@@ -354,15 +346,10 @@ int main(int argc, char **argv)
 	printf("\n\n==============       Epoll Server Demo       ==============\n\n", port);  
     printf("INFO::Server is running on port %d\n", port); 
 	
-	CEpollServer server = CEpollServer();	
-    // create and bind socket 
-    int sFd = server.CreateAndBind(port);
-    
+	CEpollServer server = CEpollServer();
+    int sFd = server.CreateAndBind(port);    
 	server.SetNonBlock(sFd);
 	server.InitEpoll(sFd);    
-    
-	server.Run();
-	
-	// free resource
+	server.Run();	
     return 0;  
 }
