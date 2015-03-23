@@ -24,9 +24,10 @@ function create_db()
 			dir VARCHAR(50) NULL DEFAULT NULL,
 			filename VARCHAR(250) NULL DEFAULT NULL,
 			filesize BIGINT NULL DEFAULT NULL,
+			flag VARCHAR(20) NULL DEFAULT NULL,
+			initial_size BIGINT NULL DEFAULT NULL,
 			node_id INT(11) NULL DEFAULT NULL,
-			dir_id INT(11) NULL DEFAULT NULL,
-			flag INT(11) NULL DEFAULT NULL,			
+			dir_id INT(11) NULL DEFAULT NULL,			
 			INDEX emp_node (node),
 			INDEX emp_filename (filename),
 			INDEX emp_node_id (node_id)
@@ -49,7 +50,6 @@ function create_sql_cmd()
 		printf ("insert into phfile_info (node, dir, filename, filesize) values('\''%s'\'', '\''%s'\'', '\''%s'\'', '\''%s'\'');\r\n", anode, adir, $NF, $5);
 	}
 	'>>${file_item}.sql
-	#chmod 755 ${file_item}.sql
 }
 
 function execute_sql_cmd()
@@ -80,10 +80,32 @@ function insert2db()
 # set value of node_id and dir_id
 function update_db()
 {
-	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
-		update phfile_info set node_id=substr(node,3) where node like 'cl%';
-		update phfile_info set node_id=substr(node,3) where node like 'cg%';
-		update phfile_info set dir_id=substr(dir,5)	where dir like 'mpeg%';
+	# for cdn r005
+	if [[ "${db_name}"x = *"coccdn"*x ]]; then
+		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
+			update phfile_info set node_id=substr(node,4) where node like 'src%';
+			update phfile_info set node_id=substr(node,5) where node like 'edge%';
+			update phfile_info set dir_id=substr(dir,5)	where dir like 'mpeg%';
+			update phfile_info p inner join vod_program v on (p.filename=v.filename) set p.initial_size=v.file_size;
+		"
+	fi
+	
+	# for cdn r007
+	if [[ "${db_name}"x = *"cpmdb"*x ]]; then
+		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
+			update phfile_info set node_id=substr(node,3) where node like 'cl%';
+			update phfile_info set node_id=substr(node,3) where node like 'cg%';
+			update phfile_info set dir_id=substr(dir,5)	where dir like 'mpeg%';
+			update phfile_info p inner join file_info f on (p.filename=f.file_name) set p.initial_size=f.file_size;
+		"
+	fi
+	
+	# compare and analysis file info
+	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "		
+		update phfile_info p set p.flag='no_record_in_db' where ISNULL(p.initial_size);
+		update phfile_info p set p.flag='source_file_is_null' where p.initial_size = 0;
+		update phfile_info p set p.flag='file_is_ok' where p.filesize=p.initial_size and p.initial_size!=0;
+		update phfile_info p left join phfile_info ph on (p.filename=ph.filename and ph.flag='file_is_ok') set p.flag='no_hope' where ISNULL(p.flag) and ISNULL(ph.flag);
 	"
 }
 
