@@ -4,17 +4,17 @@
 home_dir=/mpeg
 ftp_user_pswd=cdn_r007
 
-ci_port=18110
-rti_port=18160
-cls_port=18188
-redis_port=18379
-cpm_port=18186
-cl_port=18130
-cl_sport=38130
-cg_port=18230
-cg_sport=38230
-cdnadapter_port=18270
-rtcl_port=18150
+ci_port=9010
+rti_port=9060
+cls_port=9088
+redis_port=9379
+cpm_port=9086
+cl_port=9030
+cl_sport=29030
+cg_port=9040
+cg_sport=29040
+cdnadapter_port=9070
+rtcl_port=9050
 
 local_ip=$1
 cls_ip=${local_ip}
