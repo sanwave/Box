@@ -1,17 +1,16 @@
 #!/bin/bash
 
-db_name=$1
+db_ip=$1
+db_name=$2
 separator="_"
-db_ip=172.21.11.169
 db_user=root
 db_pswd=123456
 
 # create database and table if not exist
 function create_db()
 {
-	if [ "${db_name}"x = x ]; then
-		echo
-		echo "Usage: fileinfo2db.sh <db_name>"
+	if [ "${db_ip}"x = x -o "${db_name}"x = x ]; then
+		echo "Usage: fileinfo2db.sh <db_ip> <db_name>"
 		exit
 	fi
 	
@@ -45,7 +44,7 @@ function create_sql_cmd()
 	dir=`echo ${file_item}|awk -F ${separator} '{print $2}'|awk -F '.' '{print $1}'`
 	
 	echo "use ${db_name};">${file_item}.sql	
-	cat ${file_item}|grep '-'|awk -F " " -v anode="$node" -v adir="$dir" '
+	cat ${file_item}|grep '^-'|awk -F " " -v anode="$node" -v adir="$dir" '
 	{
 		printf ("insert into phfile_info (node, dir, filename, filesize) values('\''%s'\'', '\''%s'\'', '\''%s'\'', '\''%s'\'');\r\n", anode, adir, $NF, $5);
 	}
@@ -106,8 +105,29 @@ function update_db()
 		update phfile_info p set p.flag='source_file_is_null' where p.initial_size = 0;
 		update phfile_info p set p.flag='file_is_ok' where p.filesize=p.initial_size and p.initial_size!=0;
 		update phfile_info p left join phfile_info ph on (p.filename=ph.filename and ph.flag='file_is_ok') set p.flag='no_hope' where ISNULL(p.flag) and ISNULL(ph.flag);
+		update phfile_info p set p.flag='file_broken' where ISNULL(p.flag);
 	"
+	
+	# for cdn r005
+	if [[ "${db_name}"x = *"coccdn"*x ]]; then
+		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
+			alter table vod_program add INDEX emp_filename (filename);
+			update phfile_info p set p.flag='file_broken' where p.flag='no_hope';
+			update phfile_info p inner join vod_program v on (substring_index(p.filename, '.', 2)=v.filename)
+			  set p.flag='unknown_attach_file' where flag='no_record_in_db' and ((p.filename like '%.idx' or p.filename like '%.top'));
+			update phfile_info p inner join vod_program v on (substring_index(p.filename, '_8_', 1)=v.filename) 
+			  set p.flag='unknown_attach_file' where flag='no_record_in_db';
+			update phfile_info p inner join vod_program v on (substring_index(p.filename, '_16_', 1)=v.filename) 
+			  set p.flag='unknown_attach_file' where flag='no_record_in_db';
+			update phfile_info p inner join vod_program v on (substring_index(p.filename, '_32_', 1)=v.filename) 
+			  set p.flag='unknown_attach_file' where flag='no_record_in_db';
+		"
+	fi
 }
+
+
+echo "此脚本可能需要执行较长时间，请耐心等待几分钟..."
+echo "                                                    来杯香草拿铁！"
 
 create_db
 insert2db
