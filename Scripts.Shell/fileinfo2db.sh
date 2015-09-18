@@ -3,13 +3,13 @@
 # 
 # 说明
 # 注意：
-# 0. 请使用 ls --full-time /mpeg/mpeg1 获取CDN媒资文件列表并重定向到类似cl1_mpeg1.txt命名的文本文件中，以及CDN业务数据库
-# 1. CDN.R005需将node_savedir表中所有存储非实时目录配置ftp地址，且实际目录与ftp地址结束统一带'/'，用于恢复媒资。
-# 2. CDN.R007需在脚本执行过程中手动设置CDN节点实际存储目录
-# 3. 若输入媒资列表文件不完全，则 file_broken_need_clean 状态判断可能不正确
-# 4. 对于CDN.R005的两种形式的索引文件不做清理，若清理请手工执行
-# 5. 对于CDN.R005所有的媒资附加文件无法校验完整性，全部（不包括主媒资文件损坏的媒资附加文件，R007同）覆盖重新生成（可去掉--force参数不予覆盖）；
-#    CDN.R007损坏的媒资附加文件覆盖重新生成。
+# 0. 请使用 ls --full-time /mpeg/mpeg1 获取CDN媒资文件列表并重定向到类似cl1_mpeg1.txt命名的文本文件中，以及CDN业务数据库作为输入
+# 1. 手动导入数据库并执行此脚本
+# 2. CDN.R005 需将node_savedir表中所有存储非实时目录配置ftp地址；
+#    CDN.R007 需在脚本执行过程中手动设置CDN节点实际存储目录
+# 3. CDN.R005所有的媒资附加文件无法校验完整性，全部覆盖重新生成（可去掉--force参数只作补充）；
+#    CDN.R007损坏的媒资附加文件覆盖重新生成（不包括主媒资文件损坏的媒资附加文件，R005同）
+# 4. 若输入媒资列表文件不完全，则可能出现大量 file_broken_need_clean 状态的文件，因无法确认完整拷贝源，故无法恢复
 # 
 
 
@@ -18,7 +18,7 @@ db_name=$2
 separator="_"
 db_user=root
 db_pswd=123456
-current_dir=`pwd`
+handle_dir=`pwd`/solution
 
 function get_char()
 {
@@ -165,6 +165,9 @@ function analysis()
 		" >/dev/null 2>&1
 		
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
+			update node_savedir set ftp_url=concat(ftp_url,'/') where ftp_url not like '%/';
+			update node_savedir set real_dir=concat(real_dir,'/') where real_dir not like '%/';
+			
 			update phfile_info p inner join vod_program v on (substring_index(p.filename, '.', 2)=v.filename)
 		      set p.flag='unknown_attach_file' where p.flag='no_record_need_clean' and ((p.filename like '%.idx' or p.filename like '%.top'));
 		    update phfile_info p inner join vod_program v on (substring_index(p.filename, '_8_', 1)=v.filename) 
@@ -185,33 +188,33 @@ function make_excute_r005_db()
 		  'update vod_edge_program e inner join vod_program v on (e.content_id=v.content_id) set e.content_state=\'3\' where v.filename=\'', p.filename, '\' and e.node_id=\'', p.node_id, '\';')
 		  from phfile_info p
 		  where flag in ('source_file_broken', 'file_broken_need_clean') 
-		into outfile '${current_dir}/execute_db.sql';
+		into outfile '${handle_dir}/execute_db.sql';
 	"
-	sed "1i use coccdn;" -i ${current_dir}/execute_db.sql
+	sed "1i use coccdn;" -i ${handle_dir}/execute_db.sql
 }
 
 function make_excete_r005_shell()
 {
 	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
-		select node_id from phfile_info group by node_id into outfile '${current_dir}/variable.txt';
+		select node_id from phfile_info group by node_id into outfile '${handle_dir}/variable.txt';
 	"
 	
 	# 清理不能恢复或无需恢复的媒资文件
 	# 其中，source_file_broken，file_broken_need_clean状态的主媒资文件清理与上述数据库状态标记重复，
 	# attach_file_need_clean状态的附加文件清理会与上述数据库标记source_file_broken状态的媒资清理重复 
-	for node_id in $(cat variable.txt)
+	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
 			select concat('rm -f ', n.real_dir, p.filename)
               from phfile_info p inner join node_savedir n on (p.node_id=n.node_id and p.dir_id=n.path_idx)
               where p.flag in ('source_file_broken', 'no_record_need_clean', 'file_broken_need_clean', 'attach_file_need_clean') and p.node_id in (${node_id}) 
-			into outfile '${current_dir}/clean_${node_id}.sh';
+			into outfile '${handle_dir}/clean_${node_id}.sh';
 		"
-		sed "1i #!/bin/bash" -i ${current_dir}/clean_${node_id}.sh
+		sed "1i #!/bin/bash" -i ${handle_dir}/clean_${node_id}.sh
 	done
 	
 	# 恢复媒资文件
-	for node_id in $(cat variable.txt)
+	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
 			select concat('wget -c ', ns.ftp_url, ph.filename, ' -O ', nc.real_dir, p.filename)
@@ -219,13 +222,13 @@ function make_excete_r005_shell()
 		      inner join node_savedir ns on (ph.node_id=ns.node_id and ph.dir_id=ns.path_idx)
 		      inner join node_savedir nc on (p.node_id=nc.node_id and p.dir_id=nc.path_idx)
 		      where p.flag='file_broken' and !ISNULL(ph.flag) and p.node_id in (${node_id})
-			into outfile '${current_dir}/recover_${node_id}.sh';
+			into outfile '${handle_dir}/recover_${node_id}.sh';
 		"
-		sed "1i #!/bin/bash" -i ${current_dir}/recover_${node_id}.sh
+		sed "1i #!/bin/bash" -i ${handle_dir}/recover_${node_id}.sh
 	done
 	
 	# 构造重新生成媒资附加文件的脚本，由于现有的附加文件无法验证，故只能覆盖
-	for node_id in $(cat variable.txt)
+	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "			
 			select concat('./IndexCreator -p ', v.provider_id, ' -a ', v.asset_id, ' -s 8 --usets --force -f ', n.real_dir, v.filename)
@@ -238,9 +241,9 @@ function make_excete_r005_shell()
 			  inner join vod_program v on (e.content_id=v.content_id)
 			  inner join node_savedir n on (e.node_id=n.node_id and e.path_idx=n.path_idx)
 			  where e.node_id in (${node_id}) and v.file_state='4'
-			into outfile '${current_dir}/createfile_${node_id}.sh';
+			into outfile '${handle_dir}/createfile_${node_id}.sh';
 		"
-		sed "1i #!/bin/bash" -i ${current_dir}/createfile_${node_id}.sh
+		sed "1i #!/bin/bash" -i ${handle_dir}/createfile_${node_id}.sh
 	done
 }
 
@@ -252,15 +255,15 @@ function make_excute_r007_db()
 		select concat('update file_dist d set d.delete_state=\'1\' where d.filename=\'', p.filename, '\' and d.node_name=\'', p.node, '\';')
 		  from phfile_info p
 		  where flag in ('source_file_broken', 'file_broken_need_clean', 'attach_file_need_clean') 
-		into outfile '${current_dir}/execute_db.sql';
+		into outfile '${handle_dir}/execute_db.sql';
 	"
-	sed "1i use cpmdb;" -i ${current_dir}/execute_db.sql
+	sed "1i use cpmdb;" -i ${handle_dir}/execute_db.sql
 }
 
 function make_excete_r007_shell()
 {
 	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
-		select node_id from phfile_info group by node_id into outfile '${current_dir}/variable.txt';
+		select node_id from phfile_info group by node_id into outfile '${handle_dir}/variable.txt';
 	"
 	# 构造并填充CDN.R007的存储节点目录表
 	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
@@ -286,19 +289,19 @@ function make_excete_r007_shell()
 	######################### 此处会暂停，需手动配置CDN节点实际存储目录 #########################
 	
 	# 清理数据库中无记录的媒资文件
-	for node_id in $(cat variable.txt)
+	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
 			select concat('rm -f ', n.real_dir, p.filename)
               from phfile_info p inner join node_path n on (p.node=n.node and p.dir=n.dir)
               where p.flag in ('no_record_need_clean') and p.node_id in (${node_id})
-			into outfile '${current_dir}/clean_${node_id}.sh';
+			into outfile '${handle_dir}/clean_${node_id}.sh';
 		"
-		sed "1i #!/bin/bash" -i ${current_dir}/clean_${node_id}.sh
+		sed "1i #!/bin/bash" -i ${handle_dir}/clean_${node_id}.sh
 	done
 	
 	# 恢复损坏的媒资文件
-	for node_id in $(cat variable.txt)
+	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
 			select concat('wget -c ', ns.ftp_url, ph.filename, ' -O ', nc.real_dir, p.filename)
@@ -306,17 +309,21 @@ function make_excete_r007_shell()
 		      inner join node_path ns on (ph.node=ns.node and ph.dir=ns.dir)
 		      inner join node_path nc on (p.node=nc.node and p.dir=nc.dir)
 		      where p.flag='file_broken' and !ISNULL(ph.flag) and p.node_id in (${node_id})
-			into outfile '${current_dir}/recover_${node_id}.sh';
+			into outfile '${handle_dir}/recover_${node_id}.sh';
 		"
-		sed "1i #!/bin/bash" -i ${current_dir}/recover_${node_id}.sh
+		sed "1i #!/bin/bash" -i ${handle_dir}/recover_${node_id}.sh
 	done
 }
 
 function handle()
 {
-	rm -f ${current_dir}/execute_db.sql
-	rm -f ${current_dir}/variable.txt
-	chmod -R 777 ${current_dir}
+	if [ -d ${handle_dir} ]; then
+		rm -f ${handle_dir}/*
+	else
+		mkdir ${handle_dir}
+	fi	
+	
+	chmod -R 777 ${handle_dir}
 	if [[ "${db_name}"x = *"coccdn"*x ]]; then
 		make_excute_r005_db
 		make_excete_r005_shell
@@ -324,7 +331,9 @@ function handle()
 		make_excute_r007_db
 		make_excete_r007_shell
 	fi
-	chmod -R 755 ${current_dir}
+	chmod -R 755 ${handle_dir}
+	
+	rm -f ${handle_dir}/variable.txt
 }
 
 prepare_env
