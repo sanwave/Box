@@ -117,6 +117,7 @@ function import_data()
 # file_broken_need_clean     文件大小与数据库记录大小不匹配，因CDN不存在此文件完整拷贝，此文件无法恢复，需清理
 # attach_file_need_clean     主媒资文件不存在或无法/无需恢复的媒资附属文件，需清理
 # unknown_attach_file        CDN.R005下正常或可恢复的主媒资的附属文件，数据库无附属文件记录，故标记此状态
+# lost_need_recover          媒资文件丢失，按文件大小为0处理
 # 
 
 # 分析导入的数据
@@ -130,6 +131,19 @@ function analysis()
 			update phfile_info set dir_id=substr(dir,5)	where dir like 'mpeg%';
 			update phfile_info p inner join vod_program v on (p.filename=v.filename and p.node_id=v.node_id and p.dir_id=v.file_dir_id) set p.initial_size=v.file_size;
 			update phfile_info p inner join vod_program v on (p.filename=v.filename) inner join vod_edge_program e on (v.content_id=e.content_id and p.node_id=e.node_id and p.dir_id=e.path_idx) set p.initial_size=v.file_size;
+			
+			insert into phfile_info (node, dir, filename, filesize, flag, initial_size, node_id, dir_id)
+			select concat('src', v.node_id), concat('mpeg', v.file_dir_id), v.filename, '0', 
+			    'lost_need_recover', v.file_size, v.node_id, v.file_dir_id 
+			  from vod_program v 
+			    left join phfile_info p on (v.filename=p.filename and v.node_id=p.node_id)
+			  where v.realplay_flag=0 and v.file_state=4 and isnull(p.filename)
+			union
+			select concat('edge', e.node_id), concat('mpeg', e.path_idx), v.filename, '0', 
+			    'lost_need_recover', v.file_size, e.node_id, e.path_idx 
+			  from vod_edge_program e inner join vod_program v on (e.content_id=v.content_id)
+			    left join phfile_info p on (v.filename=p.filename and e.node_id=p.node_id)
+			  where v.realplay_flag=0 and e.content_state=4 and isnull(p.filename);
 		"
 	fi
 	
@@ -140,6 +154,13 @@ function analysis()
 			update phfile_info set node_id=substr(node,3) where node like 'cg%';
 			update phfile_info set dir_id=substr(dir,5)	where dir like 'mpeg%';
 			update phfile_info p inner join file_info f on (p.filename=f.file_name) inner join file_dist d on(f.filename=d.filename and p.node=d.node_name) set p.initial_size=f.file_size;
+			
+			insert into phfile_info (`node`, `dir`, `filename`, `filesize`, `flag`, `initial_size`, `node_id`, `dir_id`)
+            select d.node_name, 'mpeg0', d.file_name, '0', 'lost_need_recover', f.file_size, substr(d.node_name,3), 0
+              from file_dist d
+                inner join file_info f on (d.file_name=f.file_name)
+                left join phfile_info p on (d.file_name=p.filename and d.node_name=p.node)
+              where f.file_state=2 and f.file_name not in ('.', '..', 'temp') and isnull(p.filename);
 		"
 	fi
 	
@@ -150,7 +171,7 @@ function analysis()
 		update phfile_info p set p.flag='source_file_broken' where p.initial_size = 0;
 		update phfile_info p set p.flag='file_is_ok' where p.filesize=p.initial_size and p.initial_size>0;
 		update phfile_info p set p.flag='file_broken' where ISNULL(p.flag);
-		update phfile_info p left join phfile_info ph on (p.filename=ph.filename and p.node!=ph.node and ph.flag='file_is_ok') set p.flag='file_broken_need_clean' where p.flag='file_broken' and ISNULL(ph.flag);
+		update phfile_info p left join phfile_info ph on (p.filename=ph.filename and p.node!=ph.node and ph.flag='file_is_ok') set p.flag='file_broken_need_clean' where p.flag in('file_broken', 'lost_need_recover') and ISNULL(ph.flag);
 		
 		update phfile_info p left join phfile_info ph on (substring_index(p.filename, '.', 2)=ph.filename and p.node=ph.node) set p.flag='attach_file_need_clean' where (isnull(ph.flag) or ph.flag in ('no_record_need_clean', 'source_file_broken', 'file_broken_need_clean')) and (p.filename like '%.idx' or p.filename like '%.top');
 		update phfile_info p left join phfile_info ph on (substring_index(p.filename, '_8_', 1)=ph.filename and p.node=ph.node) set p.flag='attach_file_need_clean' where (isnull(ph.flag) or ph.flag in ('no_record_need_clean', 'source_file_broken', 'file_broken_need_clean')) and p.filename like '%\_8\_%';
@@ -187,7 +208,7 @@ function make_excute_r005_db()
 		select concat('update vod_program v set v.file_state=\'3\' where v.filename=\'', p.filename, '\' and v.node_id=\'', p.node_id, '\';',
 		  'update vod_edge_program e inner join vod_program v on (e.content_id=v.content_id) set e.content_state=\'3\' where v.filename=\'', p.filename, '\' and e.node_id=\'', p.node_id, '\';')
 		  from phfile_info p
-		  where flag in ('source_file_broken', 'file_broken_need_clean') 
+		  where p.flag in ('source_file_broken', 'file_broken_need_clean') 
 		into outfile '${handle_dir}/execute_db.sql';
 	"
 	sed "1i use coccdn;" -i ${handle_dir}/execute_db.sql
@@ -221,7 +242,7 @@ function make_excete_r005_shell()
 		      from phfile_info p left join phfile_info ph on (p.filename=ph.filename and p.node!=ph.node and ph.flag='file_is_ok') 
 		      inner join node_savedir ns on (ph.node_id=ns.node_id and ph.dir_id=ns.path_idx)
 		      inner join node_savedir nc on (p.node_id=nc.node_id and p.dir_id=nc.path_idx)
-		      where p.flag='file_broken' and !ISNULL(ph.flag) and p.node_id in (${node_id})
+		      where p.flag in ('file_broken', 'lost_need_recover') and !ISNULL(ph.flag) and p.node_id in (${node_id})
 			into outfile '${handle_dir}/recover_${node_id}.sh';
 		"
 		sed "1i #!/bin/bash" -i ${handle_dir}/recover_${node_id}.sh
@@ -284,8 +305,12 @@ function make_excete_r007_shell()
 	"
 	
 	echo "请手动配置CDN节点实际存储目录，数据库：${db_name}，表：node_path，列：path"
+	echo "请手动指定lost_need_recover状态的文件目录"
 	get_char
-	get_char	
+	get_char
+	mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
+		update node_path set path=concat(path,'/') where path not like '%/';
+	"
 	######################### 此处会暂停，需手动配置CDN节点实际存储目录 #########################
 	
 	# 清理数据库中无记录的媒资文件
@@ -301,6 +326,7 @@ function make_excete_r007_shell()
 	done
 	
 	# 恢复损坏的媒资文件
+	# lost_need_recover状态的文件因无法确定恢复目录可能需要手动恢复
 	for node_id in $(cat ${handle_dir}/variable.txt)
 	do
 		mysql -h${db_ip} -u${db_user} -p${db_pswd} -D${db_name} -N -e "
@@ -308,7 +334,7 @@ function make_excete_r007_shell()
 		      from phfile_info p left join phfile_info ph on (p.filename=ph.filename and p.node!=ph.node and ph.flag='file_is_ok') 
 		      inner join node_path ns on (ph.node=ns.node and ph.dir=ns.dir)
 		      inner join node_path nc on (p.node=nc.node and p.dir=nc.dir)
-		      where p.flag='file_broken' and !ISNULL(ph.flag) and p.node_id in (${node_id})
+		      where p.flag in ('file_broken', 'lost_need_recover') and !ISNULL(ph.flag) and p.node_id in (${node_id})
 			into outfile '${handle_dir}/recover_${node_id}.sh';
 		"
 		sed "1i #!/bin/bash" -i ${handle_dir}/recover_${node_id}.sh
@@ -334,6 +360,7 @@ function handle()
 	chmod -R 755 ${handle_dir}
 	
 	rm -f ${handle_dir}/variable.txt
+	find ${handle_dir} -size 0 -exec rm {} \;
 }
 
 prepare_env
